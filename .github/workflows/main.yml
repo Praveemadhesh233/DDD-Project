@@ -1,0 +1,52 @@
+name: React + Python CI/CD
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    # 1. Checkout code
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    # 2. Setup Node (React)
+    - name: Setup Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '18'
+
+    # 3. Install React dependencies
+    - name: Install frontend dependencies
+      run: |
+        cd frontend
+        npm install
+
+    # 4. Build React app
+    - name: Build frontend
+      run: |
+        cd frontend
+        npm run build
+
+    # 5. Setup Python
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    # 6. Install Python dependencies
+    - name: Install backend dependencies
+      run: |
+        cd backend
+        pip install -r requirements.txt
+
+    # 7. Run Python app (optional test)
+    - name: Run backend check
+      run: |
+        cd backend
+        python app.py
