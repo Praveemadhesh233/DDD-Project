@@ -2,7 +2,8 @@ from fastapi import FastAPI, Depends, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from backend.database import get_db, DrowsinessLog
-from typing import List
+from typing import List, Optional
+import os
 import json
 import datetime
 
@@ -32,6 +33,32 @@ def create_log(status: str, ear: float, mar: float, db: Session = Depends(get_db
     db.commit()
     db.refresh(db_log)
     return db_log
+
+@app.post("/api/alerts/sms")
+async def send_sms_alert(phone_number: str, message: str):
+    # Twilio Credentials (User can set these as environment variables)
+    account_sid = os.environ.get('TWILIO_ACCOUNT_SID')
+    auth_token = os.environ.get('TWILIO_AUTH_TOKEN')
+    from_number = os.environ.get('TWILIO_FROM_NUMBER')
+    
+    # simulation/logging for immediate feedback
+    print(f"\n[SMS ALERT] TO: {phone_number}")
+    print(f"[SMS MESSAGE] : {message}\n")
+    
+    if account_sid and auth_token and from_number:
+        try:
+            from twilio.rest import Client
+            client = Client(account_sid, auth_token)
+            client.messages.create(
+                body=message,
+                from_=from_number,
+                to=phone_number
+            )
+            return {"status": "success", "message": "SMS sent via Twilio"}
+        except Exception as e:
+            return {"status": "error", "message": f"Twilio Error: {str(e)}"}
+    else:
+        return {"status": "simulated", "message": "SMS logged to console (Twilio credentials not set)"}
 
 import base64
 import cv2

@@ -227,6 +227,11 @@ h1, h2, h3 {
   to { opacity: 1; transform: translateY(0); }
 }
 
+@keyframes bounce {
+  from { transform: translateY(0); }
+  to { transform: translateY(-10px); }
+}
+
 .animate-slide-up {
   animation: slideIn 0.5s ease forwards;
 }
