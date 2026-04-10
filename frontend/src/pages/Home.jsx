@@ -12,13 +12,18 @@ export default function Home() {
   const [metrics, setMetrics] = useState({ ear: 0, mar: 0, status: 'Normal' });
   const [wsConnected, setWsConnected] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(true);
+  const [alarmActive, setAlarmActive] = useState(false);
+  const [relativePhone, setRelativePhone] = useState('9342263135');
+  const [smsStatus, setSmsStatus] = useState(null);
 
   // Cooldown ref for database logging to prevent spam
   const lastLogTimeRef = useRef(0);
 
   // Refs for 1.5-second delay logic and continuous alarm
   const criticalStartTimeRef = useRef(null);
-  const alarmIntervalRef = useRef(null);
+  const alarmActiveRef = useRef(false);
+  const incidentCountRef = useRef(0);
+  const persistentAlertActiveRef = useRef(false);
   const selectedVoiceRef = useRef(null);
 
   // Initialize Audio Context for the alarm
@@ -50,8 +55,12 @@ export default function Home() {
   }, []);
 
   const playAlarm = useCallback(() => {
-    if (!soundEnabled) {
-      console.log('Alarm: Sound is muted');
+    if (!soundEnabled || !alarmActiveRef.current) {
+      return;
+    }
+
+    // Don't start another one if already speaking
+    if (window.speechSynthesis.speaking) {
       return;
     }
 
@@ -59,10 +68,12 @@ export default function Home() {
 
     // Use Web Speech API for voice alert
     if ('speechSynthesis' in window) {
-      // Cancel any ongoing speech
-      window.speechSynthesis.cancel();
-
-      const utterance = new SpeechSynthesisUtterance("Wake up driver, you are getting drowsy");
+      let text = "Wake up driver, you are in drowsiness";
+      if (incidentCountRef.current >= 3) {
+        text = "Driver you are in very dangerous situation please stop the vehicle and take rest";
+      }
+      
+      const utterance = new SpeechSynthesisUtterance(text);
 
       // Try to find a male voice
       const voices = window.speechSynthesis.getVoices();
@@ -81,9 +92,16 @@ export default function Home() {
         utterance.voice = voiceToUse;
       }
 
-      utterance.rate = 0.9; // Slightly slower for clarity
+      utterance.rate = 1.0; // Normal speed for urgency
       utterance.pitch = 0.8; // Lower pitch for stronger male voice
       utterance.volume = 1.0;
+
+      utterance.onend = () => {
+        // If driver still has eyes closed OR if this is a persistent alert, repeat
+        if (alarmActiveRef.current || persistentAlertActiveRef.current) {
+          playAlarm();
+        }
+      };
 
       window.speechSynthesis.speak(utterance);
     }
@@ -104,6 +122,24 @@ export default function Home() {
       console.error("Error logging incident:", err);
     }
   }, []);
+
+  // Send SMS Alert
+  const sendSmsAlert = useCallback(async () => {
+    try {
+      const response = await axios.post('/api/alerts/sms', null, {
+        params: {
+          phone_number: relativePhone,
+          message: "EMERGENCY: The DriveSafe AI system has detected critical drowsiness. The driver (Relative) needs immediate attention!"
+        }
+      });
+      console.log("SMS result:", response.data);
+      setSmsStatus('Sent');
+      setTimeout(() => setSmsStatus(null), 5000);
+    } catch (err) {
+      console.error("Failed to send SMS:", err);
+      setSmsStatus('Error');
+    }
+  }, [relativePhone]);
 
   // Set up WebSocket connection
   useEffect(() => {
@@ -133,21 +169,33 @@ export default function Home() {
 
           // Check if 1.5 seconds have passed (between 1-2 seconds) and play alarm continuously
           const elapsedTime = Date.now() - criticalStartTimeRef.current;
-          if (elapsedTime >= 1500) {
-            // Play alarm continuously using interval
-            if (!alarmIntervalRef.current) {
-              alarmIntervalRef.current = setInterval(() => {
-                playAlarm();
-              }, 3000); // Play voice alarm every 3 seconds
+          if (elapsedTime >= 2000) {
+            // Play alarm immediately and start repetition loop
+            if (!alarmActiveRef.current) {
+              incidentCountRef.current += 1;
+              
+              // If this is the 3rd incident, set it to persistent and send SMS
+              if (incidentCountRef.current === 3) {
+                persistentAlertActiveRef.current = true;
+                sendSmsAlert();
+              } else if (incidentCountRef.current > 3) {
+                persistentAlertActiveRef.current = true;
+              }
+              
+              alarmActiveRef.current = true;
+              setAlarmActive(true);
+              playAlarm();
             }
             logIncident(data.status, data.ear, data.mar);
           }
         } else {
           // Reset timer and stop continuous alarm when status is not Critical
           criticalStartTimeRef.current = null;
-          if (alarmIntervalRef.current) {
-            clearInterval(alarmIntervalRef.current);
-            alarmIntervalRef.current = null;
+          // Only stop if NOT in persistent mode
+          if (alarmActiveRef.current && !persistentAlertActiveRef.current) {
+            alarmActiveRef.current = false;
+            setAlarmActive(false);
+            window.speechSynthesis.cancel();
           }
 
           // Handle Warning status (no delay needed)
@@ -190,6 +238,16 @@ export default function Home() {
       if (audioCtxRef.current?.state === 'suspended') {
         await audioCtxRef.current.resume();
       }
+    } else {
+      setWsConnected(false);
+      if (wsRef.current) wsRef.current.close();
+      
+      // STOP EVERYTHING when monitoring is toggled off
+      incidentCountRef.current = 0;
+      persistentAlertActiveRef.current = false;
+      alarmActiveRef.current = false;
+      setAlarmActive(false);
+      window.speechSynthesis.cancel();
     }
     setIsMonitoring(!isMonitoring);
   };
@@ -227,6 +285,17 @@ export default function Home() {
           </button>
         </div>
       </div>
+
+      {smsStatus && (
+        <div className="glass-card animate-slide-up" style={{ 
+          position: 'fixed', bottom: '2rem', right: '2rem', zIndex: 1000,
+          background: smsStatus === 'Sent' ? 'var(--status-normal)' : 'var(--status-critical)',
+          padding: '1rem 2rem', border: 'none', display: 'flex', alignItems: 'center', gap: '0.75rem'
+        }}>
+          <CheckCircle size={20} />
+          <span>{smsStatus === 'Sent' ? "Emergency SMS Sent Successfully" : "Error Sending SMS"}</span>
+        </div>
+      )}
 
       <div className="dashboard-grid">
         <div className="glass-card" style={{ padding: '0', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
@@ -275,8 +344,31 @@ export default function Home() {
                     position: 'absolute', inset: 0, pointerEvents: 'none',
                     border: '4px solid var(--status-critical)',
                     boxShadow: 'inset 0 0 50px rgba(239, 68, 68, 0.5)',
-                    animation: 'pulse 1s infinite'
-                  }}></div>
+                    animation: 'pulse 1s infinite',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    zIndex: 10
+                  }}>
+                    {alarmActive && (
+                      <div style={{
+                        color: 'white',
+                        fontSize: incidentCountRef.current >= 3 ? '2rem' : '3rem',
+                        fontWeight: '900',
+                        textAlign: 'center',
+                        textShadow: '0 0 20px rgba(0,0,0,0.5)',
+                        backgroundColor: 'rgba(239, 68, 68, 0.8)',
+                        padding: '1.5rem 2rem',
+                        borderRadius: '12px',
+                        animation: 'bounce 0.5s infinite alternate',
+                        maxWidth: '80%'
+                      }}>
+                        {incidentCountRef.current >= 3 ? 
+                          "DANGEROUS SITUATION: STOP THE VEHICLE!" : 
+                          "WAKE UP!"}
+                      </div>
+                    )}
+                  </div>
                 )}
               </>
             ) : (
@@ -334,6 +426,21 @@ export default function Home() {
                   <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', opacity: 0.7 }}>Threshold: {'>'} 0.50</div>
                 </div>
                 <span className="metric-value">{metrics.mar.toFixed(2)}</span>
+              </div>
+
+              <div className="metric-box" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '1rem' }}>
+                <div style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>Relative's Emergency Contact</div>
+                <input 
+                  type="text" 
+                  value={relativePhone}
+                  onChange={(e) => setRelativePhone(e.target.value)}
+                  style={{ 
+                    width: '100%', padding: '0.75rem', borderRadius: '8px', 
+                    background: 'var(--bg-primary)', border: '1px solid var(--border-light)',
+                    color: 'white', outline: 'none'
+                  }}
+                  placeholder="Enter phone number"
+                />
               </div>
 
               <div style={{ marginTop: '1rem', padding: '1rem', background: 'var(--bg-tertiary)', borderRadius: '8px', fontSize: '0.875rem', color: 'var(--text-secondary)', lineHeight: '1.5' }}>
