@@ -17,14 +17,18 @@ If you are developing a production application, we recommend using TypeScript wi
 
 ## For running this project 
 
-python -m venv venv
+1. Open terminal frontend 
+ 
+    cd frontend
+    npm install
+    npm run dev
 
-.\venv\Scripts\activate
-python -m uvicorn backend.main:app --port 8000
+2. Open Second terminal for backend
 
-
-## open second terminal and run this commands 
-
-cd frontend
-npm install
-npm run dev
+    py -m venv venv
+   
+   .\venv\Scripts\activate
+   
+    curl -o backend/face_landmarker.task https://storage.googleapis.com/mediapipe-     models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task
+   
+    python -m uvicorn backend.main:app --port 8000
